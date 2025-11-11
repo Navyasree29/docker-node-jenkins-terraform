@@ -22,10 +22,10 @@ fi
 # login to ECR
 aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "${account_id}.dkr.ecr.${region}.amazonaws.com"
 
-# image path
+# construct image path directly (instead of using IMAGE variable from Terraform)
 IMAGE="${account_id}.dkr.ecr.${region}.amazonaws.com/${repo_name}:${image_tag}"
 
-# Wait for image to exist in ECR
+# Wait until image exists in ECR
 for i in {1..20}; do
   if aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${image_tag}" --region "$region" >/dev/null 2>&1; then
     break
@@ -34,9 +34,9 @@ for i in {1..20}; do
   sleep 10
 done
 
-# run container
+# Run container
 docker rm -f ${repo_name} || true
 docker run -d --name ${repo_name} -p 80:3000 "${IMAGE}"
 
-# log for verification
+# Log confirmation
 echo "Container deployed successfully with image: ${IMAGE}" >> /var/log/user-data.log
