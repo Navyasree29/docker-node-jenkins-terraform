@@ -36,7 +36,7 @@ done
 
 # Run container
 docker rm -f ${repo_name} || true
-docker run -d --name ${repo_name} -p 80:3000 "${IMAGE}"
+docker run -d --name ${repo_name} -p 80:3000 "$${IMAGE}"
 
 # Log confirmation
-echo "Container deployed successfully with image: ${IMAGE}" >> /var/log/user-data.log
+echo "Container deployed successfully with image: $${IMAGE}" >> /var/log/user-data.log
