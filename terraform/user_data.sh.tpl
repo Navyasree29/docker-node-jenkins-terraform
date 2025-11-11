@@ -20,10 +20,10 @@ if ! command -v aws &> /dev/null; then
 fi
 
 # login to ecr
-aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "${account_id}.dkr.ecr.${REGION}.amazonaws.com"
 
 # pull and run container
-IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPO}:${TAG}"
+IMAGE="${account_id}.dkr.ecr.${REGION}.amazonaws.com/${REPO}:${TAG}"
 
 # Wait until image exists in ECR; try a few times (this helps when terraform creates instance immediately before Jenkins pushed image)
 for i in {1..20}; do
