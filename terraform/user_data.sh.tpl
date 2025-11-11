@@ -1,38 +1,42 @@
 #!/bin/bash
 set -e
 
-REGION="${region}"
-ACCOUNT_ID="${account_id}"
-REPO="${repo_name}"
-TAG="${image_tag}"
+region="${region}"
+account_id="${account_id}"
+repo_name="${repo_name}"
+image_tag="${image_tag}"
 
-# install docker & awscli
+# install docker
 yum update -y
 amazon-linux-extras install docker -y || yum install -y docker
 service docker start
 usermod -a -G docker ec2-user
 
-# install aws cli v2 if not present (simple detection)
+# install aws cli v2 if missing
 if ! command -v aws &> /dev/null; then
   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
   unzip /tmp/awscliv2.zip -d /tmp
   /tmp/aws/install
 fi
 
-# login to ecr
-aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "${account_id}.dkr.ecr.${REGION}.amazonaws.com"
+# login to ECR
+aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "${account_id}.dkr.ecr.${region}.amazonaws.com"
 
-# pull and run container
-IMAGE="${account_id}.dkr.ecr.${REGION}.amazonaws.com/${REPO}:${TAG}"
+# image path
+IMAGE="${account_id}.dkr.ecr.${region}.amazonaws.com/${repo_name}:${image_tag}"
 
-# Wait until image exists in ECR; try a few times (this helps when terraform creates instance immediately before Jenkins pushed image)
+# Wait for image to exist in ECR
 for i in {1..20}; do
-  if aws ecr describe-images --repository-name "${REPO}" --image-ids imageTag="${TAG}" --region "$REGION"; then
+  if aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${image_tag}" --region "$region" >/dev/null 2>&1; then
     break
   fi
+  echo "Image not found yet, retrying in 10s..."
   sleep 10
 done
 
 # run container
-docker rm -f ${REPO} || true
-docker run -d --name ${REPO} -p 80:3000 "${IMAGE}"
+docker rm -f ${repo_name} || true
+docker run -d --name ${repo_name} -p 80:3000 "${IMAGE}"
+
+# log for verification
+echo "Container deployed successfully with image: ${IMAGE}" >> /var/log/user-data.log
