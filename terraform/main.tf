@@ -6,9 +6,9 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 # ECR repo
-resource "aws_ecr_repository" "app_repo" {
-  name = var.app_name
-}
+#resource "aws_ecr_repository" "app_repo" {
+#  name = var.app_name
+#}
 
 # Security Group
 resource "aws_security_group" "app_sg" {
