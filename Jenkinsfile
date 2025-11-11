@@ -47,7 +47,13 @@ pipeline {
           // ensure terraform init & apply; auto-approve only for demo
           bat "terraform init -input=false -no-color"
           // we set var.ecr_image_tag to the new tag
-          bat "terraform apply -auto-approve -var='ecr_image_tag=${IMAGE_TAG}' -var='aws_region=${AWS_REGION}' -no-color"
+          bat """
+terraform apply -auto-approve ^
+-var=\"ecr_image_tag=${IMAGE_TAG}\" ^
+-var=\"aws_region=${AWS_REGION}\" ^
+-no-color
+"""
+
         }
       }
     }
