@@ -6,9 +6,15 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 # ECR repo
-resource "aws_ecr_repository" "app_repo" {
+#resource "aws_ecr_repository" "app_repo" {
+#  name = var.app_name
+#}
+
+# Use existing ECR repository instead of creating
+data "aws_ecr_repository" "app_repo" {
   name = var.app_name
 }
+
 
 # Security Group
 resource "aws_security_group" "app_sg" {
@@ -89,7 +95,7 @@ resource "aws_instance" "app_server" {
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
     region       = var.aws_region
     account_id   = data.aws_caller_identity.current.account_id
-    repo_name    = aws_ecr_repository.app_repo.name
+    repo_name    = data.aws_ecr_repository.app_repo.name
     image_tag    = var.ecr_image_tag
   })
 }
@@ -99,5 +105,5 @@ output "app_public_ip" {
 }
 
 output "ecr_repo_url" {
-  value = aws_ecr_repository.app_repo.repository_url
+  value = data.aws_ecr_repository.app_repo.repository_url
 }
