@@ -22,7 +22,8 @@ RUN curl -fsSL https://releases.hashicorp.com/terraform/1.9.5/terraform_1.9.5_li
     rm terraform.zip
 
 # Install AWS CLI
-RUN pip3 install awscli
+RUN pip3 install awscli --break-system-packages
+
 
 # Create app directory
 WORKDIR /usr/src/app
