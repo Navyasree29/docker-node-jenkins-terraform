@@ -1,20 +1,16 @@
-# Base image
+# Dockerfile
 FROM node:18-alpine
 
-# Create app directory
 WORKDIR /usr/src/app
 
-# Copy package.json first
-COPY app/package*.json ./
+# copy package.json first to use layer caching
+COPY node.js/package*.json ./
 
-# Install dependencies
 RUN npm install --production
 
-# Copy app source code
-COPY app/ .
+# copy app code
+COPY node.js/ ./
 
-# Expose the port the app listens on
 EXPOSE 3000
 
-# Run the app
 CMD ["npm", "start"]
