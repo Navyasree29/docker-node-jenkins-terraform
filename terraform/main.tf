@@ -1,31 +1,78 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 }
 
-# data for account id
-data "aws_caller_identity" "current" {}
-
-# ECR repo
-#resource "aws_ecr_repository" "app_repo" {
-#  name = var.app_name
-#}
-
-# Use existing ECR repository instead of creating
-data "aws_ecr_repository" "app_repo" {
-  name = var.app_name
+data "aws_vpc" "default" {
+  default = true
 }
 
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
 
-# Security Group
-resource "aws_security_group" "app_sg" {
-  name        = "${var.app_name}-sg"
-  description = "Allow http inbound"
-  vpc_id      = data.aws_vpcs.default.ids[0]
+resource "aws_ecr_repository" "app_repo" {
+  name = var.ecr_repository_name
+}
+
+data "aws_iam_policy_document" "ec2_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ec2_role" {
+  name               = "ec2-ecr-pull-role-${substr(md5(timestamp()),0,6)}"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role_policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "ecr_readonly_attach" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_attach" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-profile-${substr(md5(timestamp()),0,6)}"
+  role = aws_iam_role.ec2_role.name
+}
+
+resource "aws_security_group" "node_sg" {
+  name_prefix = "node-app-sg-"
+  description = "Allow HTTP and SSH traffic"
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     description = "HTTP"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -38,77 +85,66 @@ resource "aws_security_group" "app_sg" {
   }
 }
 
-# Get default VPC (simple for beginners)
-data "aws_vpcs" "default" {
-  filter {
-    name   = "isDefault"
-    values = ["true"]
-  }
-}
+resource "aws_instance" "node_ec2" {
+  ami                    = "ami-0305d3d91b9f22e84" # keep this if validated for ap-south-1
+  instance_type          = "t3.micro"
+  subnet_id              = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.node_sg.id]
 
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
-}
+  user_data = <<-EOF
+    #!/bin/bash
+    set -e
 
-# IAM role and instance profile so EC2 can access ECR (pull)
-resource "aws_iam_role" "ec2_role" {
-  name = "${var.app_name}-ec2-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-    }]
-  })
-}
+    # Use dnf for Amazon Linux 2023; if older, adjust
+    if command -v dnf >/dev/null 2>&1; then
+      sudo dnf update -y
+      sudo dnf install -y docker aws-cli
+    else
+      sudo yum update -y
+      sudo yum install -y docker aws-cli
+    fi
 
-resource "aws_iam_role_policy_attachment" "ec2_ecr_policy_attach" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-}
+    sudo systemctl enable --now docker
+    sudo usermod -a -G docker ec2-user
 
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${var.app_name}-instance-profile"
-  role = aws_iam_role.ec2_role.name
-}
+    sleep 5
 
-# EC2 Instance
-resource "aws_instance" "app_server" {
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = var.instance_type
-  iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
-  vpc_security_group_ids      = [aws_security_group.app_sg.id]
-  associate_public_ip_address = true
+    REPO_URL=${aws_ecr_repository.app_repo.repository_url}
+    REGION=${var.region}
+    # registry host is account.dkr.ecr.region.amazonaws.com
+    registry="${aws_ecr_repository.app_repo.repository_url%%/*}"
 
-lifecycle {
-    prevent_destroy = true
-  }
+    # Using instance role: aws cli will use role credentials
+    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin ${registry}
+
+    # Try pulling image with retries
+    for i in 1 2 3 4 5; do
+      if docker pull ${REPO_URL}:latest; then
+        break
+      fi
+      sleep 5
+    done
+
+    # Stop & remove existing container if present
+    if docker ps -q -f name=node-app | grep -q .; then
+      docker stop node-app || true
+      docker rm node-app || true
+    fi
+
+    docker run -d --name node-app -p 80:3000 ${REPO_URL}:latest || true
+  EOF
 
   tags = {
-    Name = "${var.app_name}-instance"
+    Name = "nodejs-app-server"
   }
-
-  user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    region       = var.aws_region
-    account_id   = data.aws_caller_identity.current.account_id
-    repo_name    = data.aws_ecr_repository.app_repo.name
-    image_tag    = var.ecr_image_tag
-  })
 }
 
-output "app_public_ip" {
-  value = aws_instance.app_server.public_ip
+output "ecr_repository_url" {
+  value = aws_ecr_repository.app_repo.repository_url
 }
 
-output "ecr_repo_url" {
-  value = data.aws_ecr_repository.app_repo.repository_url
+output "ec2_public_ip" {
+  value = aws_instance.node_ec2.public_ip
 }
