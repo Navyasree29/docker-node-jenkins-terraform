@@ -97,7 +97,7 @@ resource "aws_instance" "node_ec2" {
     #!/bin/bash
     set -e
 
-    # Use dnf for Amazon Linux 2023; if older, adjust
+    # Install Docker & AWS CLI
     if command -v dnf >/dev/null 2>&1; then
       sudo dnf update -y
       sudo dnf install -y docker aws-cli
@@ -113,13 +113,14 @@ resource "aws_instance" "node_ec2" {
 
     REPO_URL=${aws_ecr_repository.app_repo.repository_url}
     REGION=${var.region}
-    # registry host is account.dkr.ecr.region.amazonaws.com
-    registry="${aws_ecr_repository.app_repo.repository_url%%/*}"
+    
+    # Extract registry host from repo URL in bash
+    registry=$(echo $REPO_URL | cut -d'/' -f1)
 
-    # Using instance role: aws cli will use role credentials
-    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin ${registry}
+    # Login to ECR
+    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $registry
 
-    # Try pulling image with retries
+    # Pull Docker image with retries
     for i in 1 2 3 4 5; do
       if docker pull ${REPO_URL}:latest; then
         break
