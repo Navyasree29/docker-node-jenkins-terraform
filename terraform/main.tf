@@ -86,7 +86,7 @@ resource "aws_security_group" "node_sg" {
 }
 
 resource "aws_instance" "node_ec2" {
-  ami                    = "ami-0305d3d91b9f22e84" # keep this if validated for ap-south-1
+  ami                    = "ami-03695d52f0d883f65" # keep this if validated for ap-south-1
   instance_type          = "t3.micro"
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.node_sg.id]
